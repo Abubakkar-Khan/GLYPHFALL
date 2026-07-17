@@ -3,21 +3,20 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;700&display=swap');
 
 :root {
-  --swiss-bg: #0b0b0e;
-  --swiss-surface: #121217;
-  --swiss-surface-hover: #191922;
-  --swiss-border: #20202a;
-  --swiss-border-bright: #2d2d3a;
+  --swiss-bg: #060608;
+  --swiss-surface: #13100c;
+  --swiss-surface-hover: #1e1913;
   
-  /* Primary Action Colors (Swiss/Retro) */
-  --swiss-accent: #00d2ff;     /* Cyber Cyan */
-  --swiss-warning: #ff9800;    /* Amber Warning */
-  --swiss-active-bg: rgba(0, 210, 255, 0.08);
+  /* Phosphor Amber Palette (Retro Gamer CRT) - Brighter & Higher Contrast */
+  --swiss-accent: #ff9800;      /* Terminal Amber */
+  --swiss-border: #6e451b;      /* Bright copper border */
+  --swiss-border-bright: #9e642c; /* Active bright copper */
+  --swiss-active-bg: rgba(255, 152, 0, 0.12);
 
-  /* Text Colors */
-  --swiss-text-primary: #e2e2e8;
-  --swiss-text-muted: #5d5d72;
-  --swiss-text-bright: #ffffff;
+  /* Secondary descriptors */
+  --swiss-text-primary: #ffc107;  /* High contrast Amber */
+  --swiss-text-muted: #bd854e;    /* Clearly readable copper text */
+  --swiss-text-bright: #ffeb3b;   /* Brightest phosphor yellow */
 }
 
 * {
@@ -35,7 +34,7 @@ html, body {
 }
 
 /* ═══════════════════════════════════════════════
-   CRT OVERLAYS (SUBTLE RETRO TOUCH)
+   CRT OVERLAYS
    ═══════════════════════════════════════════════ */
 
 .crt-glow {
@@ -44,7 +43,7 @@ html, body {
   left: 0;
   width: 100%;
   height: 100%;
-  background: radial-gradient(circle at 50% 50%, rgba(0, 210, 255, 0.03) 0%, transparent 80%);
+  background: radial-gradient(circle at 50% 50%, rgba(255, 143, 0, 0.04) 0%, transparent 85%);
   pointer-events: none;
   z-index: 50;
 }
@@ -57,26 +56,26 @@ html, body {
   height: 100%;
   background: linear-gradient(
     rgba(0, 0, 0, 0) 50%,
-    rgba(0, 0, 0, 0.15) 50%
+    rgba(0, 0, 0, 0.2) 50%
   );
   background-size: 100% 4px;
   pointer-events: none;
   z-index: 99;
-  opacity: 0.4;
+  opacity: 0.55;
 }
 
 /* ═══════════════════════════════════════════════
-   APPLICATION STRUCTURE (SWISS GRID)
+   APPLICATION STRUCTURE
    ═══════════════════════════════════════════════ */
 
 .app-container {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: 16px 20px;
-  max-width: 1300px;
+  padding: 12px 16px;
+  max-width: 1250px;
   margin: 0 auto;
-  gap: 12px;
+  gap: 8px;
 }
 
 /* ═══════════════════════════════════════════════
@@ -97,14 +96,13 @@ html, body {
   line-height: 1;
   white-space: pre;
   overflow: hidden;
-  opacity: 0.8;
 }
 
 .terminal-header-content {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 20px;
+  padding: 4px 16px;
   background: var(--swiss-surface);
   border-left: 1px solid var(--swiss-border);
   border-right: 1px solid var(--swiss-border);
@@ -118,9 +116,10 @@ html, body {
 .header-swiss-logo {
   font-family: 'Outfit', sans-serif;
   font-weight: 700;
-  font-size: 18px;
+  font-size: 16px;
   letter-spacing: 2px;
   color: var(--swiss-text-bright);
+  text-shadow: 0 0 4px rgba(255, 143, 0, 0.4);
 }
 
 .header-description {
@@ -132,7 +131,7 @@ html, body {
 }
 
 .subtitle-tag {
-  color: var(--swiss-accent);
+  color: var(--swiss-text-bright);
 }
 
 .subtitle-desc {
@@ -142,7 +141,7 @@ html, body {
 /* Stats */
 .ascii-stats-grid {
   display: flex;
-  gap: 24px;
+  gap: 20px;
 }
 
 .ascii-stat-card {
@@ -154,14 +153,14 @@ html, body {
 .stat-label {
   color: var(--swiss-text-muted);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 8px;
   letter-spacing: 1px;
 }
 
 .stat-val {
   color: var(--swiss-accent);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: bold;
 }
 
@@ -172,14 +171,14 @@ html, body {
 .terminal-swiss-workspace {
   flex: 1;
   display: flex;
-  gap: 16px;
+  gap: 12px;
   overflow: hidden;
   width: 100%;
 }
 
-/* Side Panel (Swiss minimal borders) */
+/* Side Panel */
 .terminal-side-panel {
-  width: 210px;
+  width: 220px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -197,8 +196,8 @@ html, body {
 .side-section-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 4px;
+  padding: 6px 10px;
   border-left: 1px solid var(--swiss-border);
   border-right: 1px solid var(--swiss-border);
   background: var(--swiss-surface);
@@ -208,20 +207,20 @@ html, body {
 .brush-shape-selectors {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .brush-shape-btn {
-  padding: 4px 8px;
+  padding: 3px 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 9px;
   text-align: left;
   border: 1px solid transparent;
   background: transparent;
   color: var(--swiss-text-muted);
   cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.15s ease;
+  border-radius: 1px;
+  transition: all 0.1s ease;
 }
 
 .brush-shape-btn:hover {
@@ -231,7 +230,7 @@ html, body {
 
 .brush-shape-btn.active {
   border-color: var(--swiss-accent);
-  color: var(--swiss-accent);
+  color: var(--swiss-text-bright);
   background: var(--swiss-active-bg);
 }
 
@@ -239,15 +238,15 @@ html, body {
 .setting-slider-container {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px dashed var(--swiss-border);
 }
 
 .slider-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 8px;
   color: var(--swiss-text-muted);
 }
 
@@ -263,15 +262,15 @@ html, body {
 .retro-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 8px;
-  height: 12px;
+  width: 6px;
+  height: 10px;
   background: var(--swiss-accent);
   cursor: pointer;
 }
 
 .retro-slider::-moz-range-thumb {
-  width: 8px;
-  height: 12px;
+  width: 6px;
+  height: 10px;
   background: var(--swiss-accent);
   border: none;
   cursor: pointer;
@@ -280,21 +279,37 @@ html, body {
 /* Action button presets */
 .console-action-btn {
   width: 100%;
-  padding: 6px 10px;
+  padding: 5px 8px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 9px;
   text-align: left;
   background: transparent;
   border: 1px solid var(--swiss-border-bright);
   color: var(--swiss-text-primary);
   cursor: pointer;
-  border-radius: 2px;
-  transition: all 0.15s ease;
+  border-radius: 1px;
+  transition: all 0.1s ease;
 }
 
 .console-action-btn:hover {
   background: var(--swiss-surface-hover);
+  border-color: var(--swiss-text-bright);
+  color: var(--swiss-text-bright);
+}
+
+.console-action-btn.active-pan {
   border-color: var(--swiss-accent);
+  color: var(--swiss-text-bright);
+  background: var(--swiss-active-bg);
+}
+
+.camera-info-readout {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  color: var(--swiss-text-muted);
 }
 
 .console-action-btn.muted {
@@ -303,18 +318,19 @@ html, body {
 }
 
 .console-action-btn.paused {
-  color: var(--swiss-warning);
-  border-color: var(--swiss-warning);
+  color: var(--swiss-text-bright);
+  border-color: var(--swiss-text-bright);
+  text-shadow: 0 0 4px rgba(255, 204, 0, 0.4);
 }
 
 .console-action-btn.danger {
-  color: #ff1744;
-  border-color: rgba(255, 23, 68, 0.3);
+  color: #ff3333;
+  border-color: rgba(255, 51, 51, 0.3);
 }
 
 .console-action-btn.danger:hover {
-  background: rgba(255, 23, 68, 0.05);
-  border-color: #ff1744;
+  background: rgba(255, 51, 51, 0.05);
+  border-color: #ff3333;
 }
 
 /* ═══════════════════════════════════════════════
@@ -345,13 +361,11 @@ html, body {
 .canvas-wrapper {
   border-left: 1px solid var(--swiss-border);
   border-right: 1px solid var(--swiss-border);
-  background: #08080c;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  background: #040406;
 }
 
 canvas {
   display: block;
-  cursor: crosshair;
 }
 
 /* ═══════════════════════════════════════════════
@@ -367,12 +381,12 @@ canvas {
 
 .terminal-console-controls {
   display: flex;
-  padding: 8px 16px;
+  padding: 6px 12px;
   background: var(--swiss-surface);
   border-left: 1px solid var(--swiss-border);
   border-right: 1px solid var(--swiss-border);
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .console-materials-group {
@@ -382,21 +396,21 @@ canvas {
 .materials-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .console-tool-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 4px;
+  padding: 3px 8px;
   background: transparent;
   border: 1px solid var(--swiss-border-bright);
   color: var(--swiss-text-muted);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
-  border-radius: 2px;
+  border-radius: 1px;
   transition: all 0.1s ease;
 }
 
@@ -409,6 +423,7 @@ canvas {
   border-color: var(--tool-accent);
   color: var(--tool-accent);
   background: var(--swiss-active-bg);
+  text-shadow: 0 0 3px var(--tool-accent);
 }
 
 .btn-selector {
@@ -435,8 +450,9 @@ canvas {
 /* Control actions at bottom right */
 .footer-console-settings {
   display: flex;
-  gap: 8px;
-  width: 200px;
+  gap: 6px;
+  width: 180px;
+  flex-shrink: 0;
 }
 
 /* ═══════════════════════════════════════════════
@@ -444,10 +460,10 @@ canvas {
    ═══════════════════════════════════════════════ */
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: scale(0.995); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .fade-in {
-  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }

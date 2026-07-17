@@ -29,7 +29,7 @@ export const AudioSystem = {
     return isMuted;
   },
 
-  // 1. Explosion: low oscillator sweep + low-pass noise blast
+  // 1. Explosion: loud oscillator sub-drop + low-pass white noise explosion
   playExplosion() {
     if (isMuted) return;
     const ctx = getAudioContext();
@@ -37,21 +37,28 @@ export const AudioSystem = {
 
     const now = ctx.currentTime;
 
-    // Oscillator for sub-bass rumble
+    // Sub-bass thump
     const osc = ctx.createOscillator();
     const oscGain = ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(160, now);
-    osc.frequency.exponentialRampToValueAtTime(10, now + 0.8);
-    oscGain.gain.setValueAtTime(0.6, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
-    osc.connect(oscGain);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(20, now + 0.65);
+    
+    const oscFilter = ctx.createBiquadFilter();
+    oscFilter.type = 'lowpass';
+    oscFilter.frequency.setValueAtTime(120, now);
+
+    oscGain.gain.setValueAtTime(0.85, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    
+    osc.connect(oscFilter);
+    oscFilter.connect(oscGain);
     oscGain.connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.85);
+    osc.stop(now + 0.7);
 
-    // Noise buffer for blast debris
-    const bufferSize = ctx.sampleRate * 0.6; // 0.6 seconds
+    // Main explosion noise blast
+    const bufferSize = ctx.sampleRate * 0.55; 
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
@@ -63,31 +70,30 @@ export const AudioSystem = {
 
     const noiseFilter = ctx.createBiquadFilter();
     noiseFilter.type = 'lowpass';
-    noiseFilter.frequency.setValueAtTime(300, now);
-    noiseFilter.frequency.exponentialRampToValueAtTime(30, now + 0.6);
+    noiseFilter.frequency.setValueAtTime(450, now);
+    noiseFilter.frequency.exponentialRampToValueAtTime(40, now + 0.5);
 
     const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.8, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
+    noiseGain.gain.setValueAtTime(1.2, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
 
     noiseNode.connect(noiseFilter);
     noiseFilter.connect(noiseGain);
     noiseGain.connect(ctx.destination);
 
     noiseNode.start(now);
-    noiseNode.stop(now + 0.7);
+    noiseNode.stop(now + 0.6);
   },
 
-  // 2. Water Splash: bandpass filtered noise with quick gain decay
+  // 2. Water Splash: crisp bandpass noise splash
   playSplash() {
     if (isMuted) return;
     const ctx = getAudioContext();
     if (!ctx) return;
 
-    // Throttle splashes slightly to avoid clipping audio output
     const now = ctx.currentTime;
     
-    const bufferSize = ctx.sampleRate * 0.15;
+    const bufferSize = ctx.sampleRate * 0.12;
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
@@ -99,41 +105,40 @@ export const AudioSystem = {
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(800, now);
-    filter.frequency.exponentialRampToValueAtTime(400, now + 0.12);
+    filter.frequency.setValueAtTime(1000, now);
+    filter.frequency.exponentialRampToValueAtTime(480, now + 0.1);
 
     const gainNode = ctx.createGain();
-    gainNode.gain.setValueAtTime(0.12, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    gainNode.gain.setValueAtTime(0.28, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
 
     noiseNode.connect(filter);
     filter.connect(gainNode);
     gainNode.connect(ctx.destination);
 
     noiseNode.start(now);
-    noiseNode.stop(now + 0.16);
+    noiseNode.stop(now + 0.13);
   },
 
-  // 3. Fire sizzle: extremely short crackle bursts
+  // 3. Fire sizzle: crackling high-pass noise pops
   playSizzle() {
     if (isMuted) return;
     const ctx = getAudioContext();
     if (!ctx) return;
 
-    // Use a high-pitched oscillator beep or noise impulse
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(2000 + Math.random() * 3000, now);
+    osc.frequency.setValueAtTime(2800 + Math.random() * 2500, now);
     
     const filter = ctx.createBiquadFilter();
     filter.type = 'highpass';
-    filter.frequency.setValueAtTime(4000, now);
+    filter.frequency.setValueAtTime(3500, now);
 
-    gain.gain.setValueAtTime(0.015, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    gain.gain.setValueAtTime(0.045, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
 
     osc.connect(filter);
     filter.connect(gain);
@@ -143,7 +148,7 @@ export const AudioSystem = {
     osc.stop(now + 0.05);
   },
 
-  // 4. Acid Fizzing: high frequency sizzles
+  // 4. Acid Fizzing: high frequency sizzling triangle wave
   playAcidFizz() {
     if (isMuted) return;
     const ctx = getAudioContext();
@@ -154,20 +159,20 @@ export const AudioSystem = {
     const gain = ctx.createGain();
 
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(1000 + Math.random() * 800, now);
-    osc.frequency.linearRampToValueAtTime(500, now + 0.06);
+    osc.frequency.setValueAtTime(1200 + Math.random() * 800, now);
+    osc.frequency.linearRampToValueAtTime(400, now + 0.055);
 
-    gain.gain.setValueAtTime(0.02, now);
+    gain.gain.setValueAtTime(0.06, now);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
 
     osc.start(now);
-    osc.stop(now + 0.07);
+    osc.stop(now + 0.065);
   },
 
-  // 5. Bomb tick: short retro square wave blip
+  // 5. Bomb tick: louder square wave blip
   playTick() {
     if (isMuted) return;
     const ctx = getAudioContext();
@@ -178,9 +183,9 @@ export const AudioSystem = {
     const gain = ctx.createGain();
 
     osc.type = 'square';
-    osc.frequency.setValueAtTime(1000, now);
-    gain.gain.setValueAtTime(0.05, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+    osc.frequency.setValueAtTime(950, now);
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -189,7 +194,7 @@ export const AudioSystem = {
     osc.stop(now + 0.06);
   },
 
-  // 6. UI click: soft sine-wave beep
+  // 6. UI click: louder, warmer sine wave click
   playClick() {
     if (isMuted) return;
     const ctx = getAudioContext();
@@ -200,15 +205,15 @@ export const AudioSystem = {
     const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(600, now);
-    osc.frequency.setValueAtTime(450, now + 0.04);
-    gain.gain.setValueAtTime(0.04, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc.frequency.setValueAtTime(650, now);
+    osc.frequency.setValueAtTime(500, now + 0.035);
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
 
     osc.connect(gain);
     gain.connect(ctx.destination);
 
     osc.start(now);
-    osc.stop(now + 0.09);
+    osc.stop(now + 0.085);
   }
 };

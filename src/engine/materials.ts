@@ -12,7 +12,7 @@ export const Materials: Record<MaterialType, MaterialDef> = {
   },
   [MaterialType.TERRAIN]: {
     glyphs: ['█', '▓', '▒', '▩', '▤', '▥', '▧', '▨'],
-    colors: ['#6d4c41', '#5d4037', '#4e342e', '#3e2723', '#8d6e63', '#4a3b32', '#5c4a3c']
+    colors: ['#5c4a3c', '#4a3b32', '#3e3129', '#6d5a4b', '#544438']
   },
   [MaterialType.WATER]: {
     glyphs: ['≈', '~', '≋', '∽', '∾', '∿'],
@@ -25,10 +25,6 @@ export const Materials: Record<MaterialType, MaterialDef> = {
   [MaterialType.FIRE]: {
     glyphs: ['☼', '▲', '*', 'x', '^', 'v', '+', '░', '▓'],
     colors: ['#ffeb3b', '#ffd54f', '#ffb300', '#ff8f00', '#ff6f00', '#ff3d00', '#dd2c00']
-  },
-  [MaterialType.SMOKE]: {
-    glyphs: ['°', 'o', '¤', '░', '▒', 'O'],
-    colors: ['#e0e0e0', '#bdbdbd', '#9e9e9e', '#757575', '#616161', '#424242', '#212121']
   },
   [MaterialType.BOMB]: {
     glyphs: ['●', '☢', '⚙'],
@@ -45,6 +41,14 @@ export const Materials: Record<MaterialType, MaterialDef> = {
   [MaterialType.WOOD]: {
     glyphs: ['▰', '▱', '🪵', '╢', '╟', '▓'],
     colors: ['#5c4033', '#6f4e37', '#8b5a2b', '#7a4f30', '#4d3319']
+  },
+  [MaterialType.PLANT]: {
+    glyphs: ['v', 'w', 'γ', '"', '░', '☘'],
+    colors: ['#2e7d32', '#4caf50', '#81c784', '#66bb6a', '#388e3c']
+  },
+  [MaterialType.BUG]: {
+    glyphs: ['m', 'w', 'n', 'u'],
+    colors: ['#ffeb3b', '#ffc107', '#ffd54f', '#ff9800']
   }
 };
 
@@ -61,10 +65,13 @@ export function initCell(cell: Cell, type: MaterialType): void {
 
   if (type === MaterialType.FIRE) {
     cell.lifetime = 30 + Math.random() * 20;
-  } else if (type === MaterialType.SMOKE) {
-    cell.lifetime = 40 + Math.random() * 20;
   } else if (type === MaterialType.ACID) {
-    cell.lifetime = 100 + Math.random() * 50; // Acid lifetime before it dilutes/neutralizes
+    cell.lifetime = 100 + Math.random() * 50;
+  } else if (type === MaterialType.BUG) {
+    cell.lifetime = 120 + Math.random() * 40; // Hunger countdown
+    cell.velocity = Math.random() < 0.5 ? -1 : 1; // Horiz direction
+  } else if (type === MaterialType.PLANT) {
+    cell.lifetime = 50 + Math.random() * 50; // Age/Growth potential
   } else {
     cell.lifetime = 0;
   }
@@ -83,21 +90,6 @@ export function updateCellVisuals(cell: Cell): void {
 
     const fireGlyphs = Materials[MaterialType.FIRE].glyphs;
     cell.char = fireGlyphs[Math.floor(Math.random() * fireGlyphs.length)];
-  } else if (cell.type === MaterialType.SMOKE) {
-    const maxLife = 60;
-    const ratio = Math.max(0, Math.min(1, cell.lifetime / maxLife));
-    const smokeColors = Materials[MaterialType.SMOKE].colors;
-    const colorIdx = Math.floor((1 - ratio) * smokeColors.length);
-    cell.color = smokeColors[Math.min(colorIdx, smokeColors.length - 1)];
-
-    if (cell.lifetime < 15) {
-      cell.char = '°';
-    } else if (cell.lifetime < 30) {
-      cell.char = 'o';
-    } else {
-      const smokeGlyphs = Materials[MaterialType.SMOKE].glyphs;
-      cell.char = smokeGlyphs[Math.floor(Math.random() * smokeGlyphs.length)];
-    }
   } else if (cell.type === MaterialType.WATER) {
     if (Math.random() < 0.1) {
       const waterGlyphs = Materials[MaterialType.WATER].glyphs;
@@ -113,7 +105,6 @@ export function updateCellVisuals(cell: Cell): void {
       cell.char = Math.random() < 0.5 ? '☢' : '●';
     }
   } else if (cell.type === MaterialType.ACID) {
-    // Acid bubbling shimmer
     if (Math.random() < 0.2) {
       const acidGlyphs = Materials[MaterialType.ACID].glyphs;
       cell.char = acidGlyphs[Math.floor(Math.random() * acidGlyphs.length)];
@@ -123,10 +114,24 @@ export function updateCellVisuals(cell: Cell): void {
       cell.color = acidColors[Math.floor(Math.random() * acidColors.length)];
     }
   } else if (cell.type === MaterialType.OIL) {
-    // Oil petroleum sheen shimmers slightly
     if (Math.random() < 0.08) {
       const oilColors = Materials[MaterialType.OIL].colors;
       cell.color = oilColors[Math.floor(Math.random() * oilColors.length)];
+    }
+  } else if (cell.type === MaterialType.BUG) {
+    const bugGlyphs = Materials[MaterialType.BUG].glyphs;
+    const animationFrame = Math.floor(cell.lifetime / 3) % bugGlyphs.length;
+    cell.char = bugGlyphs[animationFrame];
+    if (cell.lifetime < 40) {
+      cell.color = '#ff5722';
+    } else {
+      const bugColors = Materials[MaterialType.BUG].colors;
+      cell.color = bugColors[Math.floor((cell.lifetime / 160) * bugColors.length) % bugColors.length];
+    }
+  } else if (cell.type === MaterialType.PLANT) {
+    if (Math.random() < 0.04) {
+      const plantColors = Materials[MaterialType.PLANT].colors;
+      cell.color = plantColors[Math.floor(Math.random() * plantColors.length)];
     }
   }
 }

@@ -1,73 +1,115 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { SimulationState, MaterialType } from '../../engine/types';
+import { SimulationState, MaterialType, Cell } from '../../engine/types';
 import { createGrid } from '../../engine/grid';
 import { Materials, initCell } from '../../engine/materials';
 import { startLoop } from '../../engine/loop';
 import { handlePointer } from '../../input/input';
 import { AudioSystem } from '../../engine/audio';
 
-// Canvas size and cell dimensions
+// Simulation grid size
+const COLS = 160;
+const ROWS = 90;
 const CELL_SIZE = 10;
-const CANVAS_WIDTH = 960;
+
+// Canvas display size
+const CANVAS_WIDTH = 920;
 const CANVAS_HEIGHT = 520;
 
-const cols = Math.floor(CANVAS_WIDTH / CELL_SIZE);
-const rows = Math.floor(CANVAS_HEIGHT / CELL_SIZE);
+// Center Camera math: W_v - W_g * scale / 2
+const defaultZoom = 0.55;
+const defaultPanX = Math.floor((CANVAS_WIDTH - COLS * CELL_SIZE * defaultZoom) / 2); // (920 - 880)/2 = 20
+const defaultPanY = Math.floor((CANVAS_HEIGHT - ROWS * CELL_SIZE * defaultZoom) / 2); // (520 - 495)/2 = 12.5
+
+// Helper to apply rigid borders inside the grid
+function applyBorders(grid: Cell[]) {
+  // Bottom ground floor
+  for (let x = 0; x < COLS; x++) {
+    for (let y = ROWS - 3; y < ROWS; y++) {
+      initCell(grid[y * COLS + x], MaterialType.TERRAIN);
+    }
+  }
+  // Side walls
+  for (let y = 0; y < ROWS; y++) {
+    initCell(grid[y * COLS + 0], MaterialType.TERRAIN);
+    initCell(grid[y * COLS + (COLS - 1)], MaterialType.TERRAIN);
+  }
+  // Top ceiling
+  for (let x = 0; x < COLS; x++) {
+    initCell(grid[x], MaterialType.TERRAIN);
+  }
+}
 
 export default function CanvasComponent() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<SimulationState | null>(null);
-  const [selectedMaterial, setSelectedMaterial] = useState<MaterialType>(MaterialType.SAND);
+
+  // Tool / Brush config
+  const [selectedMaterial, setSelectedMaterial] = useState<MaterialType | 'pan'>(MaterialType.SAND);
   const [brushSize, setBrushSize] = useState(2);
   const [brushShape, setBrushShape] = useState<'circle' | 'square' | 'line'>('circle');
+  
+  // Camera Nav (Centered on startup)
+  const [zoom, setZoom] = useState(defaultZoom);
+  const [panX, setPanX] = useState(defaultPanX);
+  const [panY, setPanY] = useState(defaultPanY);
+
+  // States
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(false);
   const [tick, setTick] = useState(0);
   const [fps, setFps] = useState(0);
-  
+  const [particleCount, setParticleCount] = useState(0);
+
   const isPainting = useRef(false);
+  const isPanning = useRef(false);
+  const startDrag = useRef({ x: 0, y: 0 });
+  const startPan = useRef({ x: 0, y: 0 });
+
   const selectedMaterialRef = useRef(selectedMaterial);
   const brushSizeRef = useRef(brushSize);
   const brushShapeRef = useRef(brushShape);
+  const zoomRef = useRef(zoom);
+  const panXRef = useRef(panX);
+  const panYRef = useRef(panY);
 
-  // Keep refs in sync
+  // Keep refs updated for callback access
   useEffect(() => { selectedMaterialRef.current = selectedMaterial; }, [selectedMaterial]);
   useEffect(() => { brushSizeRef.current = brushSize; }, [brushSize]);
   useEffect(() => { brushShapeRef.current = brushShape; }, [brushShape]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { panXRef.current = panX; }, [panX]);
+  useEffect(() => { panYRef.current = panY; }, [panY]);
 
-  // Sync initial mute state
+  // Sync mute state
   useEffect(() => {
     setMuted(AudioSystem.getMuteState());
   }, []);
 
-  // Initialize simulation state
+  // Initialize simulation grid
   useEffect(() => {
-    const grid = createGrid(cols, rows);
-    // Add ground terrain with variation
-    for (let x = 0; x < cols; x++) {
-      for (let y = rows - 3; y < rows; y++) {
-        const idx = y * cols + x;
-        initCell(grid[idx], MaterialType.TERRAIN);
+    const grid = createGrid(COLS, ROWS);
+    applyBorders(grid);
+
+    // Starting plant and wood blocks in center
+    const midY = Math.floor(ROWS / 2);
+    for (let x = 40; x < COLS - 40; x++) {
+      if (x % 20 < 10) {
+        initCell(grid[midY * COLS + x], MaterialType.WOOD);
+      } else {
+        initCell(grid[midY * COLS + x], MaterialType.PLANT);
       }
     }
-    // Add some random starting blocks
-    for (let i = 0; i < 4; i++) {
-      const bx = Math.floor(20 + Math.random() * (cols - 40));
-      const by = Math.floor(rows / 2 + Math.random() * 8);
-      const bwidth = Math.floor(8 + Math.random() * 10);
-      for (let x = bx; x < bx + bwidth; x++) {
-        const idx = by * cols + x;
-        if (idx >= 0 && idx < grid.length) {
-          initCell(grid[idx], MaterialType.WOOD);
-        }
-      }
+    // Spawn some initial bugs on the center structure
+    for (let i = 0; i < 5; i++) {
+      const bx = 45 + i * 15;
+      initCell(grid[(midY - 2) * COLS + bx], MaterialType.BUG);
     }
 
     stateRef.current = {
-      width: cols,
-      height: rows,
+      width: COLS,
+      height: ROWS,
       grid,
       tick: 0,
       paused: false,
@@ -82,7 +124,6 @@ export default function CanvasComponent() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Glyph cache for performance
     const glyphCache: Record<string, HTMLCanvasElement> = {};
     function getGlyph(char: string, color: string) {
       const key = `${char}_${color}`;
@@ -99,24 +140,46 @@ export default function CanvasComponent() {
       return off;
     }
 
-    // FPS counter
     let frameCount = 0;
     let lastFpsTime = performance.now();
 
     function render() {
-      ctx.fillStyle = '#0a0a0f';
+      ctx.fillStyle = '#050507';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      ctx.save();
+      // Apply pan/zoom camera matrix
+      ctx.translate(panXRef.current, panYRef.current);
+      ctx.scale(zoomRef.current, zoomRef.current);
+
       const { grid, width, height } = state;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
+
+      // Camera frustum culling: only render visible blocks
+      const minX = Math.max(0, Math.floor(-panXRef.current / (CELL_SIZE * zoomRef.current)));
+      const maxX = Math.min(width, Math.ceil((CANVAS_WIDTH - panXRef.current) / (CELL_SIZE * zoomRef.current)));
+      const minY = Math.max(0, Math.floor(-panYRef.current / (CELL_SIZE * zoomRef.current)));
+      const maxY = Math.min(height, Math.ceil((CANVAS_HEIGHT - panYRef.current) / (CELL_SIZE * zoomRef.current)));
+
+      let count = 0;
+      for (let y = minY; y < maxY; y++) {
+        for (let x = minX; x < maxX; x++) {
           const idx = y * width + x;
           const cell = grid[idx];
           if (cell.type === MaterialType.EMPTY) continue;
           
+          count++;
           const glyph = getGlyph(cell.char, cell.color);
           ctx.drawImage(glyph, x * CELL_SIZE, y * CELL_SIZE);
         }
       }
+
+      // Draw simulation grid borders inside viewport (scaled)
+      ctx.strokeStyle = '#6e451b'; // clear copper-amber outline
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(0, 0, width * CELL_SIZE, height * CELL_SIZE);
+
+      ctx.restore();
+      setParticleCount(count);
     }
 
     const cleanup = startLoop(state, (newState) => {
@@ -134,42 +197,49 @@ export default function CanvasComponent() {
     return cleanup;
   }, []);
 
-  // Pause sync
+  // Update pause states
   useEffect(() => {
-    if (stateRef.current) {
-      stateRef.current.paused = paused;
-    }
+    if (stateRef.current) stateRef.current.paused = paused;
   }, [paused]);
 
-  // Mouse handlers
+  // Coordinate translator
   const getGridPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX - rect.left;
+    const clientY = e.clientY - rect.top;
+
     const scaleX = CANVAS_WIDTH / rect.width;
     const scaleY = CANVAS_HEIGHT / rect.height;
-    const x = Math.floor((e.clientX - rect.left) * scaleX / CELL_SIZE);
-    const y = Math.floor((e.clientY - rect.top) * scaleY / CELL_SIZE);
-    return { x, y };
-  }, []);
+    const canvasX = clientX * scaleX;
+    const canvasY = clientY * scaleY;
+
+    const gridX = Math.floor((canvasX - panX) / (CELL_SIZE * zoom));
+    const gridY = Math.floor((canvasY - panY) / (CELL_SIZE * zoom));
+    return { x: gridX, y: gridY };
+  }, [panX, panY, zoom]);
 
   const paint = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const state = stateRef.current;
-    if (!state) return;
+    if (!state || selectedMaterialRef.current === 'pan') return;
     const pos = getGridPos(e);
     if (!pos) return;
     handlePointer(
-      state, 
-      pos.x, 
-      pos.y, 
-      selectedMaterialRef.current, 
+      state,
+      pos.x,
+      pos.y,
+      selectedMaterialRef.current,
       brushSizeRef.current,
       brushShapeRef.current
     );
   }, [getGridPos]);
 
-  // Play retro paint synth sound on mousedown based on material
-  const playMaterialSound = (mat: MaterialType) => {
+  const playMaterialSound = (mat: MaterialType | 'pan') => {
+    if (mat === 'pan') {
+      AudioSystem.playClick();
+      return;
+    }
     switch (mat) {
       case MaterialType.WATER:
         AudioSystem.playSplash();
@@ -189,169 +259,175 @@ export default function CanvasComponent() {
     }
   };
 
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    isPainting.current = true;
-    playMaterialSound(selectedMaterialRef.current);
-    paint(e);
-  }, [paint]);
+  // Drag pan and drawing handlers
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 2 || e.button === 1 || e.shiftKey || selectedMaterial === 'pan') {
+      isPanning.current = true;
+      startDrag.current = { x: e.clientX, y: e.clientY };
+      startPan.current = { x: panX, y: panY };
+      AudioSystem.playClick();
+    } else {
+      isPainting.current = true;
+      playMaterialSound(selectedMaterialRef.current);
+      paint(e);
+    }
+  };
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isPainting.current) {
-      if (Math.random() < 0.12) {
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isPanning.current) {
+      const dx = e.clientX - startDrag.current.x;
+      const dy = e.clientY - startDrag.current.y;
+      setPanX(startPan.current.x + dx);
+      setPanY(startPan.current.y + dy);
+    } else if (isPainting.current) {
+      if (Math.random() < 0.1) {
         playMaterialSound(selectedMaterialRef.current);
       }
       paint(e);
     }
-  }, [paint]);
+  };
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = () => {
     isPainting.current = false;
+    isPanning.current = false;
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+  };
+
+  // Wheel zoom handler
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX - rect.left;
+    const clientY = e.clientY - rect.top;
+
+    const scaleX = CANVAS_WIDTH / rect.width;
+    const scaleY = CANVAS_HEIGHT / rect.height;
+    const mouseX = clientX * scaleX;
+    const mouseY = clientY * scaleY;
+
+    const zoomIntensity = 0.08;
+    const zoomFactor = e.deltaY < 0 ? (1 + zoomIntensity) : (1 - zoomIntensity);
+    const newZoom = Math.max(0.4, Math.min(3.5, zoom * zoomFactor));
+
+    const newPanX = mouseX - (mouseX - panX) * (newZoom / zoom);
+    const newPanY = mouseY - (mouseY - panY) * (newZoom / zoom);
+
+    setZoom(newZoom);
+    setPanX(newPanX);
+    setPanY(newPanY);
+
+    if (Math.random() < 0.15) {
+      AudioSystem.playClick();
+    }
+  };
+
+  const resetCamera = useCallback(() => {
+    AudioSystem.playClick();
+    setZoom(defaultZoom);
+    setPanX(defaultPanX);
+    setPanY(defaultPanY);
   }, []);
 
-  // Clear grid
   const handleClear = useCallback(() => {
     AudioSystem.playClick();
     const state = stateRef.current;
     if (!state) return;
-    const grid = createGrid(cols, rows);
-    for (let x = 0; x < cols; x++) {
-      for (let y = rows - 3; y < rows; y++) {
-        const idx = y * cols + x;
-        initCell(grid[idx], MaterialType.TERRAIN);
-      }
-    }
+    const grid = createGrid(COLS, ROWS);
+    applyBorders(grid);
     state.grid = grid;
   }, []);
 
-  // Presets loader
-  const loadPreset = (presetName: string) => {
+  const loadPreset = useCallback((presetName: string) => {
     const state = stateRef.current;
     if (!state) return;
     AudioSystem.playClick();
-    
-    const grid = createGrid(cols, rows);
-    
-    if (presetName === 'hourglass') {
-      const midX = Math.floor(cols / 2);
-      const midY = Math.floor(rows / 2);
-      
-      // Draw double funnel
-      for (let y = 4; y < rows - 4; y++) {
-        const offset = Math.abs(y - midY);
-        const leftX = midX - Math.floor(offset * 0.8) - 1;
-        const rightX = midX + Math.floor(offset * 0.8) + 1;
-        
-        if (leftX >= 5 && leftX < cols - 5 && rightX >= 5 && rightX < cols - 5) {
-          if (offset > 1) {
-            initCell(grid[y * cols + leftX], MaterialType.TERRAIN);
-            initCell(grid[y * cols + rightX], MaterialType.TERRAIN);
-          } else {
-            // Spout opening gap
-            if (y !== midY) {
-              initCell(grid[y * cols + leftX], MaterialType.TERRAIN);
-              initCell(grid[y * cols + rightX], MaterialType.TERRAIN);
-            }
-          }
-        }
-      }
-      
-      // Top and bottom horizontal caps
-      for (let x = 5; x < cols - 5; x++) {
-        initCell(grid[4 * cols + x], MaterialType.TERRAIN);
-        initCell(grid[(rows - 5) * cols + x], MaterialType.TERRAIN);
-      }
-      
-      // Populate sand in top chamber
-      for (let y = 5; y < midY - 2; y++) {
-        const offset = midY - y;
-        const leftX = midX - Math.floor(offset * 0.8) + 2;
-        const rightX = midX + Math.floor(offset * 0.8) - 2;
-        for (let x = leftX; x <= rightX; x++) {
-          initCell(grid[y * cols + x], MaterialType.SAND);
-        }
-      }
-    } 
-    else if (presetName === 'dambreak') {
-      const midX = Math.floor(cols / 2);
-      
-      // Vertical wood divider in the center
-      for (let y = 6; y < rows - 3; y++) {
-        const idx = y * cols + midX;
-        initCell(grid[idx], MaterialType.WOOD);
-      }
-      
-      // Fill left side with water
-      for (let y = 14; y < rows - 3; y++) {
-        for (let x = 6; x < midX; x++) {
-          initCell(grid[y * cols + x], MaterialType.WATER);
-        }
-      }
 
-      // Place a trigger bomb right in the center of the wood wall
-      const bombIdx = Math.floor(rows / 2) * cols + midX;
-      initCell(grid[bombIdx], MaterialType.BOMB);
+    const grid = createGrid(COLS, ROWS);
+
+    if (presetName === 'dambreak') {
+      const midX = Math.floor(COLS / 2);
+      // Wood partition
+      for (let y = 5; y < ROWS - 3; y++) {
+        initCell(grid[y * COLS + midX], MaterialType.WOOD);
+      }
+      // Water reservoir (left)
+      for (let y = 20; y < ROWS - 3; y++) {
+        for (let x = 10; x < midX; x++) {
+          initCell(grid[y * COLS + x], MaterialType.WATER);
+        }
+      }
+      // Moss/Plants on the floor of right side
+      for (let y = ROWS - 5; y < ROWS - 3; y++) {
+        for (let x = midX + 1; x < COLS - 10; x++) {
+          initCell(grid[y * COLS + x], MaterialType.PLANT);
+        }
+      }
+      // Bomb in the center of the wall
+      initCell(grid[Math.floor(ROWS / 2) * COLS + midX], MaterialType.BOMB);
     } 
     else if (presetName === 'bombtest') {
-      const midY = Math.floor(rows / 2);
-      
-      // Platform 1 (Wood)
-      for (let x = 12; x < cols - 12; x++) {
-        initCell(grid[(midY - 4) * cols + x], MaterialType.WOOD);
-        initCell(grid[(midY + 4) * cols + x], MaterialType.WOOD);
+      const midY = Math.floor(ROWS / 2);
+
+      // Wooden scaffolding
+      for (let x = 20; x < COLS - 20; x++) {
+        initCell(grid[(midY - 6) * COLS + x], MaterialType.WOOD);
+        initCell(grid[(midY + 4) * COLS + x], MaterialType.WOOD);
+      }
+      for (let y = midY - 6; y < ROWS - 3; y++) {
+        initCell(grid[y * COLS + 25], MaterialType.WOOD);
+        initCell(grid[y * COLS + COLS - 26], MaterialType.WOOD);
       }
 
-      // Vertical support posts
-      for (let y = midY - 4; y < rows - 3; y++) {
-        initCell(grid[y * cols + 16], MaterialType.WOOD);
-        initCell(grid[y * cols + cols - 17], MaterialType.WOOD);
-      }
-      
-      // Pools on top platform (Oil, Sand, Acid)
-      for (let x = 20; x < cols - 20; x++) {
-        if (x % 30 < 8) {
-          initCell(grid[(midY - 5) * cols + x], MaterialType.OIL);
-        } else if (x % 30 < 16) {
-          initCell(grid[(midY - 5) * cols + x], MaterialType.SAND);
-        } else if (x % 30 < 24) {
-          initCell(grid[(midY - 5) * cols + x], MaterialType.ACID);
+      // Pour combustible fuels (Oil, plants, and bugs)
+      for (let x = 30; x < COLS - 30; x++) {
+        if (x % 35 < 8) {
+          initCell(grid[(midY - 7) * COLS + x], MaterialType.OIL);
+        } else if (x % 35 < 16) {
+          initCell(grid[(midY - 7) * COLS + x], MaterialType.PLANT);
+        } else if (x % 35 < 24) {
+          initCell(grid[(midY - 7) * COLS + x], MaterialType.BUG);
         }
       }
 
-      // Spawn bombs on wood platforms
-      initCell(grid[(midY - 5) * cols + Math.floor(cols / 3)], MaterialType.BOMB);
-      initCell(grid[(midY - 5) * cols + Math.floor(cols * 2 / 3)], MaterialType.BOMB);
+      // Bombs on top decks
+      initCell(grid[(midY - 7) * COLS + Math.floor(COLS / 3)], MaterialType.BOMB);
+      initCell(grid[(midY - 7) * COLS + Math.floor(COLS * 2 / 3)], MaterialType.BOMB);
 
-      // Water on lower platform
-      for (let x = 24; x < cols - 24; x++) {
-        if (x % 16 < 8) {
-          initCell(grid[(midY + 3) * cols + x], MaterialType.WATER);
+      // Acid reservoir below
+      for (let x = 40; x < COLS - 40; x++) {
+        if (x % 20 < 6) {
+          initCell(grid[(midY + 3) * COLS + x], MaterialType.ACID);
         }
       }
     }
 
-    // Standard base floor
-    for (let x = 0; x < cols; x++) {
-      for (let y = rows - 3; y < rows; y++) {
-        initCell(grid[y * cols + x], MaterialType.TERRAIN);
-      }
-    }
-
+    applyBorders(grid);
     state.grid = grid;
-  };
+  }, []);
 
-  // Keyboard shortcuts
+  // Keyboard controls
   useEffect(() => {
-    const materialKeys: Record<string, MaterialType> = {
+    const materialKeys: Record<string, MaterialType | 'pan'> = {
       '1': MaterialType.SAND,
       '2': MaterialType.WATER,
       '3': MaterialType.FIRE,
-      '4': MaterialType.SMOKE,
-      '5': MaterialType.TERRAIN,
-      '6': MaterialType.BOMB,
-      '7': MaterialType.ACID,
-      '8': MaterialType.OIL,
-      '9': MaterialType.WOOD,
+      '4': MaterialType.TERRAIN,
+      '5': MaterialType.BOMB,
+      '6': MaterialType.OIL,
+      '7': MaterialType.WOOD,
+      '8': MaterialType.PLANT,
+      '9': MaterialType.BUG,
+      'b': MaterialType.BUG,
+      'B': MaterialType.BUG,
+      'a': MaterialType.ACID,
+      'A': MaterialType.ACID,
       '0': MaterialType.EMPTY,
+      'p': 'pan',
+      'P': 'pan'
     };
 
     const handler = (e: KeyboardEvent) => {
@@ -367,12 +443,14 @@ export default function CanvasComponent() {
       if (e.key === 'c' || e.key === 'C') {
         handleClear();
       }
+      if (e.key === 'r' || e.key === 'R') {
+        resetCamera();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleClear]);
+  }, [handleClear, resetCamera]);
 
-  // Audio mute toggler
   const toggleMute = () => {
     const isNowMuted = AudioSystem.toggleMute();
     setMuted(isNowMuted);
@@ -381,39 +459,35 @@ export default function CanvasComponent() {
     }
   };
 
-  // Material tool definitions
+  // Material tool palette definitions (retro monospace, no smoke)
   const tools = [
     { type: MaterialType.SAND, label: 'SAND', shortcut: '1', color: '#eedc82' },
-    { type: MaterialType.WATER, label: 'WATER', shortcut: '2', color: '#00bfff' },
+    { type: MaterialType.WATER, label: 'WATER', shortcut: '2', color: '#1e90ff' },
     { type: MaterialType.FIRE, label: 'FIRE', shortcut: '3', color: '#ff4500' },
-    { type: MaterialType.SMOKE, label: 'SMOKE', shortcut: '4', color: '#a0a0a0' },
-    { type: MaterialType.TERRAIN, label: 'WALL', shortcut: '5', color: '#8d6e63' },
-    { type: MaterialType.BOMB, label: 'BOMB', shortcut: '6', color: '#ff1744' },
-    { type: MaterialType.ACID, label: 'ACID', shortcut: '7', color: '#39ff14' },
-    { type: MaterialType.OIL, label: 'OIL', shortcut: '8', color: '#bd53ff' },
-    { type: MaterialType.WOOD, label: 'WOOD', shortcut: '9', color: '#d2b48c' },
+    { type: MaterialType.TERRAIN, label: 'WALL', shortcut: '4', color: '#8d6e63' },
+    { type: MaterialType.BOMB, label: 'BOMB', shortcut: '5', color: '#ff1744' },
+    { type: MaterialType.ACID, label: 'ACID', shortcut: 'a', color: '#39ff14' },
+    { type: MaterialType.OIL, label: 'OIL', shortcut: '6', color: '#bd53ff' },
+    { type: MaterialType.WOOD, label: 'WOOD', shortcut: '7', color: '#d2b48c' },
+    { type: MaterialType.PLANT, label: 'PLANT', shortcut: '8', color: '#4caf50' },
+    { type: MaterialType.BUG, label: 'BUG', shortcut: '9', color: '#ffc107' },
     { type: MaterialType.EMPTY, label: 'ERASE', shortcut: '0', color: '#555570' },
   ];
-
-  // Count active particles
-  const particleCount = stateRef.current
-    ? stateRef.current.grid.filter(c => c.type !== MaterialType.EMPTY).length
-    : 0;
 
   return (
     <div className="terminal-container app-container fade-in">
       <div className="crt-glow" />
       <div className="crt-scanlines" />
 
-      {/* SWISS RETRO HUD HEADER */}
+      {/* RETRO HEADER */}
       <div className="terminal-header-box">
         <div className="ascii-border-top">┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐</div>
         <div className="terminal-header-content">
           <div className="header-logo-container">
-            <div className="header-swiss-logo">GLYPHFALL // ASC.SIM</div>
+            <div className="header-swiss-logo">GLYPHFALL // TERMINAL</div>
             <div className="header-description">
-              <span className="subtitle-tag">[CORE: ONLINE]</span>
-              <span className="subtitle-desc">SWISS MONOCHROME GRID TERMINAL v2.0</span>
+              <span className="subtitle-tag">[CORE // ENG.ACTIVE]</span>
+              <span className="subtitle-desc">MONOCHROME AMBER CRT MONITOR FRAME v3.1</span>
             </div>
           </div>
 
@@ -435,21 +509,38 @@ export default function CanvasComponent() {
         <div className="ascii-border-bottom">└────────────────────────────────────────────────────────────────────────────────────────────────────────┘</div>
       </div>
 
-      {/* MAIN LAYOUT */}
+      {/* WORKSPACE PANELS */}
       <div className="terminal-swiss-workspace">
-        {/* SIDE PANEL: Presets & Controls */}
+        {/* LEFT COLUMN: Controls & Presets */}
         <div className="terminal-side-panel">
           <div className="side-section-title">┌─ SCENE PRESETS ──┐</div>
           <div className="side-section-body">
-            <button className="console-action-btn" onClick={() => loadPreset('hourglass')}>
-              [⏳] HOURGLASS
-            </button>
             <button className="console-action-btn" onClick={() => loadPreset('dambreak')}>
-              [🌊] DAM BREAK
+              [PRESET: RESERVOIR]
             </button>
             <button className="console-action-btn" onClick={() => loadPreset('bombtest')}>
-              [💣] BOMB TEST
+              [PRESET: TEST SITE]
             </button>
+          </div>
+          <div className="side-section-footer">└──────────────────┘</div>
+
+          <div className="side-section-title" style={{ marginTop: '12px' }}>┌─ VIEWPORT NAV ───┐</div>
+          <div className="side-section-body">
+            <button 
+              className={`console-action-btn ${selectedMaterial === 'pan' ? 'active-pan' : ''}`}
+              onClick={() => { setSelectedMaterial('pan'); AudioSystem.playClick(); }}
+            >
+              {selectedMaterial === 'pan' ? '[PANNING FEED ACTIVE]' : '[DRAG PAN MODE (P)]'}
+            </button>
+            
+            <button className="console-action-btn" onClick={resetCamera}>
+              [CAMERA RESET (R)]
+            </button>
+
+            <div className="camera-info-readout">
+              <div>ZOOM: {zoom.toFixed(2)}x</div>
+              <div>X: {Math.floor(panX)} Y: {Math.floor(panY)}</div>
+            </div>
           </div>
           <div className="side-section-footer">└──────────────────┘</div>
 
@@ -460,24 +551,24 @@ export default function CanvasComponent() {
                 className={`brush-shape-btn ${brushShape === 'circle' ? 'active' : ''}`}
                 onClick={() => { setBrushShape('circle'); AudioSystem.playClick(); }}
               >
-                ● CIRCLE
+                SHAPE: CIRCLE
               </button>
               <button 
                 className={`brush-shape-btn ${brushShape === 'square' ? 'active' : ''}`}
                 onClick={() => { setBrushShape('square'); AudioSystem.playClick(); }}
               >
-                ■ SQUARE
+                SHAPE: SQUARE
               </button>
               <button 
                 className={`brush-shape-btn ${brushShape === 'line' ? 'active' : ''}`}
                 onClick={() => { setBrushShape('line'); AudioSystem.playClick(); }}
               >
-                ▬ LINE
+                SHAPE: HORIZ LINE
               </button>
             </div>
             
             <div className="setting-slider-container">
-              <span className="slider-label">SIZE: {brushSize}</span>
+              <span className="slider-label">RADIUS: {brushSize}</span>
               <input
                 type="range"
                 className="retro-slider"
@@ -490,23 +581,23 @@ export default function CanvasComponent() {
           </div>
           <div className="side-section-footer">└──────────────────┘</div>
 
-          <div className="side-section-title" style={{ marginTop: '12px' }}>┌─ AUDIO CONTROL ──┐</div>
+          <div className="side-section-title" style={{ marginTop: '12px' }}>┌─ SYSTEM AUDIO ───┐</div>
           <div className="side-section-body">
             <button 
               className={`console-action-btn ${muted ? 'muted' : ''}`}
               onClick={toggleMute}
             >
-              {muted ? '[🔇] AUDIO MUTED' : '[🔊] AUDIO ACTIVE'}
+              {muted ? '[AUDIO MUTED]' : '[AUDIO ENG.ACTIVE]'}
             </button>
           </div>
           <div className="side-section-footer">└──────────────────┘</div>
         </div>
 
-        {/* FEED PANEL: Grid Canvas */}
+        {/* FEED PANEL: Viewport with Zoom and Pan */}
         <div className="terminal-body">
           <div className="canvas-frame">
             <div className="frame-header">
-              <span>┌── FEED: SIMULATION_GRID ────────────────────────────────────────────────────────────────────────┐</span>
+              <span>┌── CRT SIMULATION VIEWPORT ───────────────────────────────────────────────────────────────────┐</span>
             </div>
             <div className="canvas-wrapper">
               <canvas
@@ -517,18 +608,20 @@ export default function CanvasComponent() {
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
+                onContextMenu={handleContextMenu}
+                onWheel={handleWheel}
               />
             </div>
             <div className="frame-footer">
-              <span>└────────────────────────────────────────────────────────────── RESOLUTION: {CANVAS_WIDTH}x{CANVAS_HEIGHT} ─┘</span>
+              <span>└─────────────────────────────────────────────── SCROLL: ZOOM ── RIGHT-CLICK: DRAG PAN ─┘</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* FOOTER BAR: Material Palette */}
+      {/* FOOTER BAR: Material palette selection */}
       <div className="terminal-footer">
-        <div className="ascii-border-top">┌── MATERIAL SELECTOR ──────────────────────────────────────────────────────────────────────────────┐</div>
+        <div className="ascii-border-top">┌── MATERIAL MATRIX SELECTOR ───────────────────────────────────────────────────────────────────────┐</div>
         
         <div className="terminal-console-controls">
           <div className="console-materials-group">
@@ -560,14 +653,14 @@ export default function CanvasComponent() {
               onClick={() => { setPaused(p => !p); AudioSystem.playClick(); }}
               title="Spacebar"
             >
-              {paused ? '▶ PLAY' : '⏸ PAUS'}
+              {paused ? '▶ SYSTEM RUN' : '⏸ SYSTEM HALT'}
             </button>
             <button
               className="console-action-btn danger"
               onClick={handleClear}
               title="C Key"
             >
-              ✕ CLEAR
+              ✕ CLEAN GRID
             </button>
           </div>
         </div>
