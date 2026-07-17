@@ -483,13 +483,7 @@ export default function CanvasComponent() {
       <div className="terminal-header-box">
         <div className="ascii-border-top">┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐</div>
         <div className="terminal-header-content">
-          <div className="header-logo-container">
-            <div className="header-swiss-logo">GLYPHFALL // TERMINAL</div>
-            <div className="header-description">
-              <span className="subtitle-tag">[CORE // ENG.ACTIVE]</span>
-              <span className="subtitle-desc">MONOCHROME AMBER CRT MONITOR FRAME v3.1</span>
-            </div>
-          </div>
+          <div className="header-swiss-logo">GLYPHFALL</div>
 
           <div className="ascii-stats-grid">
             <div className="ascii-stat-card">
