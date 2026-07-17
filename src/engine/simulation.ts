@@ -1,6 +1,7 @@
 import { Cell, MaterialType, SimulationState } from './types';
 import { index, getCell, setCell, swapCells, isEmpty } from './grid';
-import { Materials } from './materials';
+import { initCell, updateCellVisuals } from './materials';
+import { AudioSystem } from './audio';
 
 /**
  * Process a single simulation tick.
@@ -12,6 +13,11 @@ import { Materials } from './materials';
 export function updateSimulation(state: SimulationState): void {
   const { width, height, grid, tick } = state;
   const frameId = tick + 1; // unique identifier for this tick
+
+  // Track if any explosions or sizzling happened this tick to play sounds
+  let explosionTriggered = false;
+  let sizzleCount = 0;
+  let acidFizzCount = 0;
 
   // Randomize horizontal sweep direction each row to avoid bias
   for (let y = height - 1; y >= 0; y--) {
@@ -25,6 +31,9 @@ export function updateSimulation(state: SimulationState): void {
       if (cell.type === MaterialType.EMPTY) continue;
       if (cell.updated === frameId) continue; // already moved this tick
 
+      // Update color/glyph animation frames dynamically
+      updateCellVisuals(cell);
+
       switch (cell.type) {
         case MaterialType.SAND:
           handleSand(state, x, y, idx, frameId);
@@ -34,18 +43,45 @@ export function updateSimulation(state: SimulationState): void {
           break;
         case MaterialType.FIRE:
           handleFire(state, x, y, idx, frameId);
+          if (Math.random() < 0.002) sizzleCount++;
           break;
         case MaterialType.SMOKE:
           handleSmoke(state, x, y, idx, frameId);
           break;
         case MaterialType.BOMB:
-          handleBomb(state, x, y, idx, frameId);
+          if (handleBomb(state, x, y, idx, frameId)) {
+            explosionTriggered = true;
+          }
+          break;
+        case MaterialType.ACID:
+          if (handleAcid(state, x, y, idx, frameId)) {
+            acidFizzCount++;
+          }
+          break;
+        case MaterialType.OIL:
+          if (handleOil(state, x, y, idx, frameId)) {
+            sizzleCount += 3; // ignites fast!
+          }
+          break;
+        case MaterialType.WOOD:
+          handleWood(state, x, y, idx, frameId);
           break;
         // Terrain is static – nothing to do
         default:
           break;
       }
     }
+  }
+
+  // Play audio system ambiance
+  if (explosionTriggered) {
+    AudioSystem.playExplosion();
+  }
+  if (sizzleCount > 0 && Math.random() < 0.4) {
+    AudioSystem.playSizzle();
+  }
+  if (acidFizzCount > 0 && Math.random() < 0.3) {
+    AudioSystem.playAcidFizz();
   }
 
   state.tick = frameId;
@@ -92,7 +128,10 @@ function handleSand(state: SimulationState, x: number, y: number, idx: number, f
 /** Water behavior – falls, then spreads sideways */
 function handleWater(state: SimulationState, x: number, y: number, idx: number, frameId: number) {
   // Down
-  if (tryMove(state, x, y, x, y + 1, frameId)) return;
+  if (tryMove(state, x, y, x, y + 1, frameId)) {
+    if (Math.random() < 0.001) AudioSystem.playSplash();
+    return;
+  }
   // Diagonal down-left / down-right
   const leftFirst = Math.random() < 0.5;
   if (leftFirst) {
@@ -120,11 +159,8 @@ function handleFire(state: SimulationState, x: number, y: number, idx: number, f
     const nCell = state.grid[nIdx];
     if (nCell.type === MaterialType.WATER) {
       // Turn fire into smoke (steam) and remove water cell
-      cell.type = MaterialType.SMOKE;
-      cell.char = Materials[MaterialType.SMOKE].glyph;
-      cell.color = Materials[MaterialType.SMOKE].color;
-      nCell.type = MaterialType.EMPTY;
-      nCell.char = ' ';
+      initCell(cell, MaterialType.SMOKE);
+      initCell(nCell, MaterialType.EMPTY);
       markUpdated(state.grid, idx, frameId);
       markUpdated(state.grid, nIdx, frameId);
       return;
@@ -134,24 +170,18 @@ function handleFire(state: SimulationState, x: number, y: number, idx: number, f
   // Decrease lifetime
   if (cell.lifetime <= 0) {
     // Transition to smoke
-    cell.type = MaterialType.SMOKE;
-    cell.char = Materials[MaterialType.SMOKE].glyph;
-    cell.color = Materials[MaterialType.SMOKE].color;
-    cell.lifetime = 40 + Math.random() * 20; // smoke lifetime
+    initCell(cell, MaterialType.SMOKE);
     markUpdated(state.grid, idx, frameId);
     return;
   }
   cell.lifetime--;
 
-  // Spread to flammable terrain (treated as TERRAIN for simplicity)
+  // Spread to flammable terrain
   for (const [nx, ny] of neighbors) {
     const nIdx = index(state.width, nx, ny);
     const nCell = state.grid[nIdx];
-    if (nCell.type === MaterialType.TERRAIN && Math.random() < 0.2) {
-      nCell.type = MaterialType.FIRE;
-      nCell.char = Materials[MaterialType.FIRE].glyph;
-      nCell.color = Materials[MaterialType.FIRE].color;
-      nCell.lifetime = 30 + Math.random() * 20;
+    if (nCell.type === MaterialType.TERRAIN && Math.random() < 0.1) {
+      initCell(nCell, MaterialType.FIRE);
       markUpdated(state.grid, nIdx, frameId);
     }
   }
@@ -168,9 +198,7 @@ function handleFire(state: SimulationState, x: number, y: number, idx: number, f
 function handleSmoke(state: SimulationState, x: number, y: number, idx: number, frameId: number) {
   const cell = state.grid[idx];
   if (cell.lifetime <= 0) {
-    cell.type = MaterialType.EMPTY;
-    cell.char = ' ';
-    cell.color = '#000000';
+    initCell(cell, MaterialType.EMPTY);
     markUpdated(state.grid, idx, frameId);
     return;
   }
@@ -195,22 +223,183 @@ function handleSmoke(state: SimulationState, x: number, y: number, idx: number, 
   markUpdated(state.grid, idx, frameId);
 }
 
-/** Bomb falls like sand; explodes on impact */
-function handleBomb(state: SimulationState, x: number, y: number, idx: number, frameId: number) {
+/** Bomb falls like sand; explodes on impact. Returns true if exploded */
+function handleBomb(state: SimulationState, x: number, y: number, idx: number, frameId: number): boolean {
   // Simple fall first – reuse sand logic
-  if (tryMove(state, x, y, x, y + 1, frameId)) return;
-  // If cannot fall, explode
+  if (tryMove(state, x, y, x, y + 1, frameId)) {
+    if (Math.random() < 0.05) AudioSystem.playTick();
+    return false;
+  }
+  
+  // If cannot fall, explode!
   explode(state, x, y);
-  // Clear bomb cell
   const cell = state.grid[idx];
-  cell.type = MaterialType.EMPTY;
-  cell.char = ' ';
-  cell.color = '#000000';
+  initCell(cell, MaterialType.EMPTY);
   markUpdated(state.grid, idx, frameId);
+  return true;
+}
+
+/** Acid behaves like a liquid, dissolving cells it contacts */
+function handleAcid(state: SimulationState, x: number, y: number, idx: number, frameId: number): boolean {
+  const { width, height, grid } = state;
+  const cell = grid[idx];
+  let didDissolve = false;
+
+  // Corrode neighbors
+  const neighbors = getNeighborCoords(state, x, y);
+  for (const [nx, ny] of neighbors) {
+    const nIdx = index(width, nx, ny);
+    const nCell = grid[nIdx];
+    if (nCell.type !== MaterialType.EMPTY && nCell.type !== MaterialType.ACID) {
+      if (Math.random() < 0.18) {
+        // Dissolve neighbor cell, turn into neon toxic green smoke
+        initCell(nCell, MaterialType.SMOKE);
+        nCell.color = '#39ff14'; 
+        nCell.char = '°';
+        nCell.lifetime = 25 + Math.random() * 15;
+
+        // Dissolve acid itself
+        initCell(cell, MaterialType.EMPTY);
+        
+        markUpdated(grid, idx, frameId);
+        markUpdated(grid, nIdx, frameId);
+        didDissolve = true;
+        break;
+      }
+    }
+  }
+
+  if (didDissolve) return true;
+
+  // Fall like liquid
+  if (tryMove(state, x, y, x, y + 1, frameId)) return false;
+  
+  const leftFirst = Math.random() < 0.5;
+  if (leftFirst) {
+    if (tryMove(state, x, y, x - 1, y + 1, frameId)) return false;
+    if (tryMove(state, x, y, x + 1, y + 1, frameId)) return false;
+  } else {
+    if (tryMove(state, x, y, x + 1, y + 1, frameId)) return false;
+    if (tryMove(state, x, y, x - 1, y + 1, frameId)) return false;
+  }
+  
+  const spread = Math.random() < 0.5 ? -1 : 1;
+  if (tryMove(state, x, y, x + spread, y, frameId)) return false;
+  if (tryMove(state, x, y, x - spread, y, frameId)) return false;
+
+  markUpdated(grid, idx, frameId);
+  return false;
+}
+
+/** Oil behavior – sticky, floats on water, highly flammable */
+function handleOil(state: SimulationState, x: number, y: number, idx: number, frameId: number): boolean {
+  const { width, height, grid } = state;
+  const cell = grid[idx];
+
+  // Catch fire from neighbors
+  const neighbors = getNeighborCoords(state, x, y);
+  for (const [nx, ny] of neighbors) {
+    const nIdx = index(width, nx, ny);
+    const nCell = grid[nIdx];
+    if (nCell.type === MaterialType.FIRE) {
+      initCell(cell, MaterialType.FIRE);
+      cell.lifetime = 85 + Math.random() * 45; // Burns long
+      markUpdated(grid, idx, frameId);
+      return true;
+    }
+  }
+
+  // Floats on water (if cell directly below is water, swap)
+  if (y + 1 < height) {
+    const belowIdx = index(width, x, y + 1);
+    const belowCell = grid[belowIdx];
+    if (belowCell.type === MaterialType.WATER) {
+      swapCells(grid, width, x, y, x, y + 1);
+      markUpdated(grid, belowIdx, frameId);
+      return false;
+    }
+  }
+
+  // Slow flow (75% lateral rate)
+  if (tryMove(state, x, y, x, y + 1, frameId)) return false;
+  
+  if (Math.random() < 0.75) {
+    const leftFirst = Math.random() < 0.5;
+    if (leftFirst) {
+      if (tryMove(state, x, y, x - 1, y + 1, frameId)) return false;
+      if (tryMove(state, x, y, x + 1, y + 1, frameId)) return false;
+    } else {
+      if (tryMove(state, x, y, x + 1, y + 1, frameId)) return false;
+      if (tryMove(state, x, y, x - 1, y + 1, frameId)) return false;
+    }
+    
+    const spread = Math.random() < 0.5 ? -1 : 1;
+    if (tryMove(state, x, y, x + spread, y, frameId)) return false;
+    if (tryMove(state, x, y, x - spread, y, frameId)) return false;
+  }
+
+  markUpdated(grid, idx, frameId);
+  return false;
+}
+
+/** Wood behavior – solid, grows on water absorb, ignites easily */
+function handleWood(state: SimulationState, x: number, y: number, idx: number, frameId: number) {
+  const { width, height, grid } = state;
+  const cell = grid[idx];
+
+  const neighbors = getNeighborCoords(state, x, y);
+  let hasWaterNeighbor = false;
+  let hasFireNeighbor = false;
+
+  for (const [nx, ny] of neighbors) {
+    const nIdx = index(width, nx, ny);
+    const nCell = grid[nIdx];
+    if (nCell.type === MaterialType.WATER) {
+      hasWaterNeighbor = true;
+      // Drink water
+      if (Math.random() < 0.06) {
+        initCell(nCell, MaterialType.EMPTY);
+      }
+    } else if (nCell.type === MaterialType.FIRE) {
+      hasFireNeighbor = true;
+    }
+  }
+
+  // Catch fire
+  if (hasFireNeighbor && Math.random() < 0.2) {
+    initCell(cell, MaterialType.FIRE);
+    cell.lifetime = 90 + Math.random() * 50; // burns a long time
+    markUpdated(grid, idx, frameId);
+    return;
+  }
+
+  // Grow wood upwards/laterally if it has water
+  if (hasWaterNeighbor && Math.random() < 0.015) {
+    const growthDirs = [[0, -1], [-1, 0], [1, 0]];
+    const emptySpots: [number, number][] = [];
+    for (const [dx, dy] of growthDirs) {
+      const gx = x + dx;
+      const gy = y + dy;
+      if (inBounds(width, height, gx, gy)) {
+        const gIdx = index(width, gx, gy);
+        if (grid[gIdx].type === MaterialType.EMPTY) {
+          emptySpots.push([gx, gy]);
+        }
+      }
+    }
+    if (emptySpots.length > 0) {
+      const [gx, gy] = emptySpots[Math.floor(Math.random() * emptySpots.length)];
+      const gIdx = index(width, gx, gy);
+      initCell(grid[gIdx], MaterialType.WOOD);
+      markUpdated(grid, gIdx, frameId);
+    }
+  }
+
+  markUpdated(grid, idx, frameId);
 }
 
 function explode(state: SimulationState, cx: number, cy: number) {
-  const radius = 8;
+  const radius = 9;
   const { width, height, grid } = state;
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
@@ -225,31 +414,19 @@ function explode(state: SimulationState, cx: number, cy: number) {
       const cell = grid[idx];
       switch (cell.type) {
         case MaterialType.TERRAIN:
-          // Destroy terrain – become empty
-          cell.type = MaterialType.EMPTY;
-          cell.char = ' ';
-          cell.color = '#000000';
+        case MaterialType.WOOD:
+        case MaterialType.SAND:
+          initCell(cell, MaterialType.EMPTY);
           break;
         case MaterialType.WATER:
-          // Vaporize – turn into smoke
-          cell.type = MaterialType.SMOKE;
-          cell.char = Materials[MaterialType.SMOKE].glyph;
-          cell.color = Materials[MaterialType.SMOKE].color;
-          cell.lifetime = 30 + Math.random() * 20;
-          break;
-        case MaterialType.SAND:
-          // Clear sand as well
-          cell.type = MaterialType.EMPTY;
-          cell.char = ' ';
-          cell.color = '#000000';
+        case MaterialType.ACID:
+          // Vaporize
+          initCell(cell, MaterialType.SMOKE);
           break;
         default:
-          // Optionally ignite flammable stuff
-          if (cell.type === MaterialType.TERRAIN && Math.random() < 0.1) {
-            cell.type = MaterialType.FIRE;
-            cell.char = Materials[MaterialType.FIRE].glyph;
-            cell.color = Materials[MaterialType.FIRE].color;
-            cell.lifetime = 30 + Math.random() * 20;
+          if (Math.random() < 0.3) {
+            initCell(cell, MaterialType.FIRE);
+            cell.lifetime = 40 + Math.random() * 20;
           }
           break;
       }

@@ -6,6 +6,9 @@ export enum MaterialType {
   FIRE = 4,
   SMOKE = 5,
   BOMB = 6,
+  ACID = 7,
+  OIL = 8,
+  WOOD = 9,
 }
 
 export interface Cell {
